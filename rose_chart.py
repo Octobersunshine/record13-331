@@ -30,8 +30,65 @@ else:
 matplotlib.rcParams["axes.unicode_minus"] = False
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import numpy as np
 from typing import List, Optional, Tuple, Union
+
+
+def _hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _rgb_to_hex(rgb: Tuple[float, float, float]) -> str:
+    rgb_255 = tuple(max(0, min(255, int(round(c * 255)))) for c in rgb)
+    return "#{:02X}{:02X}{:02X}".format(*rgb_255)
+
+
+def _adjust_brightness(rgb: Tuple[float, float, float], factor: float) -> Tuple[float, float, float]:
+    if factor >= 1.0:
+        return tuple(c + (1.0 - c) * (factor - 1.0) for c in rgb)
+    else:
+        return tuple(c * factor for c in rgb)
+
+
+def _generate_gradient_colors(
+    values: List[Union[int, float]],
+    use_gradient: bool = False,
+    gradient_cmap: str = "YlOrRd",
+    gradient_base_color: Optional[str] = None,
+    gradient_reverse: bool = False,
+) -> List:
+    if not use_gradient and gradient_base_color is None:
+        return []
+
+    values_arr = np.array(values, dtype=float)
+    v_min = np.min(values_arr)
+    v_max = np.max(values_arr)
+    if v_max - v_min < 1e-9:
+        ratios = np.full(len(values_arr), 0.5)
+    else:
+        ratios = (values_arr - v_min) / (v_max - v_min)
+
+    if gradient_reverse:
+        ratios = 1.0 - ratios
+
+    result_colors = []
+
+    if gradient_base_color is not None:
+        base_rgb = tuple(c / 255.0 for c in _hex_to_rgb(gradient_base_color))
+        for ratio in ratios:
+            factor = 0.45 + ratio * 0.50
+            adjusted = _adjust_brightness(base_rgb, factor)
+            result_colors.append((*adjusted, 1.0))
+    else:
+        cmap = plt.cm.get_cmap(gradient_cmap)
+        for ratio in ratios:
+            result_colors.append(cmap(ratio))
+
+    return result_colors
 
 
 def plot_rose_chart(
@@ -55,6 +112,12 @@ def plot_rose_chart(
     save_path: Optional[str] = None,
     dpi: int = 150,
     show: bool = True,
+    use_gradient: bool = False,
+    gradient_cmap: str = "YlOrRd",
+    gradient_base_color: Optional[str] = None,
+    gradient_reverse: bool = False,
+    show_colorbar: bool = False,
+    colorbar_label: str = "数值大小",
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
     绘制南丁格尔玫瑰图（极坐标条形图），用于对比多个类别的数量或比例。
@@ -68,7 +131,7 @@ def plot_rose_chart(
     title : str
         图表标题
     colors : Optional[List[str]]
-        自定义颜色列表，若为 None 则使用默认渐变色
+        自定义颜色列表，若为 None 则使用默认配色；与 use_gradient 同时设置时以渐变优先
     figsize : Tuple[int, int]
         图像尺寸 (宽, 高)，单位为英寸
     show_value : bool
@@ -101,6 +164,20 @@ def plot_rose_chart(
         保存图片的分辨率
     show : bool
         是否调用 plt.show() 显示图像
+    use_gradient : bool
+        是否启用颜色渐变（根据数值大小映射颜色深浅）
+    gradient_cmap : str
+        渐变使用的 matplotlib colormap 名称，如 'YlOrRd'、'Blues'、'viridis'、'Reds' 等
+        仅在 gradient_base_color 为 None 时生效
+    gradient_base_color : Optional[str]
+        单色渐变基准色（HEX 格式，如 '#3498DB'），设置后将以该色为基础按明度生成渐变
+        优先级高于 gradient_cmap
+    gradient_reverse : bool
+        是否反转渐变方向：False=大值深/暖色，True=大值浅/冷色
+    show_colorbar : bool
+        是否显示颜色条图例（仅 colormap 渐变模式下效果最佳）
+    colorbar_label : str
+        颜色条的标题文字
 
     Returns
     -------
@@ -112,17 +189,33 @@ def plot_rose_chart(
     >>> categories = ['销售', '运营', '技术', '市场', '人事', '财务']
     >>> values = [120, 85, 200, 65, 45, 55]
     >>> fig, ax = plot_rose_chart(categories, values, title='部门人员分布')
+    >>> # 启用 YlOrRd 橙红色渐变
+    >>> fig, ax = plot_rose_chart(categories, values, use_gradient=True, gradient_cmap='YlOrRd')
+    >>> # 启用蓝色单色渐变
+    >>> fig, ax = plot_rose_chart(categories, values, gradient_base_color='#3498DB')
     """
     if len(categories) != len(values):
         raise ValueError("categories 和 values 的长度必须一致")
 
     n = len(categories)
 
-    if colors is None:
+    gradient_colors = _generate_gradient_colors(
+        values=values,
+        use_gradient=use_gradient,
+        gradient_cmap=gradient_cmap,
+        gradient_base_color=gradient_base_color,
+        gradient_reverse=gradient_reverse,
+    )
+
+    if len(gradient_colors) > 0:
+        colors = gradient_colors
+    elif colors is None:
         cmap = plt.cm.get_cmap("Set2", n)
         colors = [cmap(i) for i in range(n)]
     elif len(colors) != n:
         raise ValueError("colors 列表长度需与 categories 一致")
+
+    using_cmap_gradient = len(gradient_colors) > 0 and gradient_base_color is None
 
     values_arr = np.array(values, dtype=float)
     theta = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
@@ -225,6 +318,29 @@ def plot_rose_chart(
 
     ax.set_title(title, fontsize=title_fontsize, fontweight="bold", pad=28)
 
+    if show_colorbar and using_cmap_gradient:
+        v_min = float(np.min(values_arr)) if len(values_arr) > 0 else 0.0
+        v_max = float(np.max(values_arr)) if len(values_arr) > 0 else 1.0
+        if v_max - v_min < 1e-9:
+            v_max = v_min + 1.0
+        sm = plt.cm.ScalarMappable(
+            cmap=plt.cm.get_cmap(gradient_cmap),
+            norm=plt.Normalize(vmin=v_min, vmax=v_max),
+        )
+        sm.set_array([])
+        if gradient_reverse:
+            sm.norm = plt.Normalize(vmin=v_max, vmax=v_min)
+        cbar = fig.colorbar(
+            sm,
+            ax=ax,
+            orientation="vertical",
+            pad=0.02,
+            fraction=0.045,
+            shrink=0.8,
+        )
+        cbar.set_label(colorbar_label, fontsize=11)
+        cbar.ax.tick_params(labelsize=9)
+
     if save_path:
         fig.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
 
@@ -286,6 +402,8 @@ def plot_stacked_rose_chart(
     dpi: int = 150,
     show: bool = True,
     counterclock: bool = True,
+    use_series_gradient: bool = False,
+    series_gradient_reverse: bool = False,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
     绘制分组（多系列）南丁格尔玫瑰图，用于多维度对比。
@@ -300,7 +418,8 @@ def plot_stacked_rose_chart(
     title : str
         图表标题
     colors : Optional[dict]
-        自定义颜色字典，键为系列名，值为颜色字符串
+        自定义颜色字典，键为系列名，值为颜色字符串（HEX/RGB）。当 use_series_gradient=True
+        时，此颜色将作为各系列的渐变基准色
     figsize : Tuple[int, int]
         图像尺寸
     legend_title : str
@@ -319,6 +438,10 @@ def plot_stacked_rose_chart(
         是否显示图片
     counterclock : bool
         是否逆时针排列
+    use_series_gradient : bool
+        是否在每个系列内部按数值大小启用明度渐变（大值=深色，小值=浅色）
+    series_gradient_reverse : bool
+        是否反转系列内渐变方向：False=大值深色，True=大值浅色
 
     Returns
     -------
@@ -332,6 +455,8 @@ def plot_stacked_rose_chart(
     ...     '产品B': [80, 100, 90, 130],
     ... }
     >>> fig, ax = plot_stacked_rose_chart(categories, series_data)
+    >>> # 启用系列内明度渐变（每个产品内部按季度数值深浅变化）
+    >>> fig, ax = plot_stacked_rose_chart(categories, series_data, use_series_gradient=True)
     """
     series_names = list(series_data.keys())
     n_series = len(series_names)
@@ -343,7 +468,20 @@ def plot_stacked_rose_chart(
 
     if colors is None:
         cmap = plt.cm.get_cmap("tab10", n_series)
-        colors = {series_names[i]: cmap(i) for i in range(n_series)}
+        colors = {}
+        for i, name in enumerate(series_names):
+            rgba = cmap(i)
+            colors[name] = _rgb_to_hex((rgba[0], rgba[1], rgba[2]))
+
+    series_base_colors = {}
+    for name in series_names:
+        c = colors.get(name, "#3498DB")
+        if isinstance(c, tuple):
+            if len(c) >= 4:
+                c = _rgb_to_hex((c[0], c[1], c[2]))
+            elif len(c) == 3:
+                c = _rgb_to_hex(c)
+        series_base_colors[name] = c if isinstance(c, str) else "#3498DB"
 
     all_values = np.concatenate([np.array(v, dtype=float) for v in series_data.values()])
     max_val = np.max(all_values) if len(all_values) > 0 else 1.0
@@ -393,25 +531,54 @@ def plot_stacked_rose_chart(
     theta = np.linspace(0.0, 2 * np.pi, n_categories, endpoint=False)
 
     bars_by_series = {}
+    legend_handles = []
     for s_idx, series_name in enumerate(series_names):
         values_arr = np.array(series_data[series_name], dtype=float)
+        base_hex = series_base_colors.get(series_name, "#3498DB")
+
+        if use_series_gradient:
+            s_max = float(np.max(values_arr)) if len(values_arr) > 0 else 1.0
+            s_min = float(np.min(values_arr)) if len(values_arr) > 0 else 0.0
+            if s_max - s_min < 1e-9:
+                ratios = np.full(len(values_arr), 0.5)
+            else:
+                ratios = (values_arr - s_min) / (s_max - s_min)
+            if series_gradient_reverse:
+                ratios = 1.0 - ratios
+            base_rgb = tuple(c / 255.0 for c in _hex_to_rgb(base_hex))
+            series_colors = []
+            for r in ratios:
+                factor = 0.45 + r * 0.50
+                adj = _adjust_brightness(base_rgb, factor)
+                series_colors.append((*adj, 0.88))
+        else:
+            base_rgb = tuple(c / 255.0 for c in _hex_to_rgb(base_hex))
+            series_colors = [(*base_rgb, 0.88) for _ in values_arr]
+
         if counterclock:
             offset = (-group_width * 0.425) + (s_idx + 0.5) * bar_width
         else:
             offset = (group_width * 0.425) - (s_idx + 0.5) * bar_width
+
         bars = ax.bar(
             theta + offset,
             values_arr,
             width=bar_width,
             bottom=0,
-            color=colors.get(series_name, f"C{s_idx}"),
+            color=series_colors,
             edgecolor="white",
             linewidth=1.2,
-            alpha=0.88,
-            label=series_name,
             align="center",
         )
         bars_by_series[series_name] = bars
+
+        legend_patch = plt.matplotlib.patches.Patch(
+            facecolor=(*tuple(c / 255.0 for c in _hex_to_rgb(base_hex)), 0.88),
+            edgecolor="white",
+            linewidth=1.2,
+            label=series_name,
+        )
+        legend_handles.append(legend_patch)
 
     ax.set_theta_zero_location("N")
     ax.set_theta_direction(-1 if counterclock else 1)
@@ -431,6 +598,7 @@ def plot_stacked_rose_chart(
 
     legend_right_pos = 1.28 + 0.015 * min(max_series_name_len, 10)
     legend = ax.legend(
+        handles=legend_handles,
         loc="upper left",
         bbox_to_anchor=(legend_right_pos, 1.06),
         title=legend_title,
