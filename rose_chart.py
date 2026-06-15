@@ -128,8 +128,34 @@ def plot_rose_chart(
     theta = np.linspace(0.0, 2 * np.pi, n, endpoint=False)
     width = 2 * np.pi / n
 
+    max_val = np.max(values_arr) if len(values_arr) > 0 else 1.0
+    if max_val <= 0:
+        max_val = 1.0
+
+    max_label_len = max(len(str(c)) for c in categories) if n > 0 else 0
+    scale_factor = 1.25
+    if show_value:
+        scale_factor += 0.08
+    if max_label_len >= 6:
+        scale_factor += 0.04 * min(max_label_len - 5, 5)
+    if n >= 10:
+        scale_factor += 0.08
+    if n >= 16:
+        scale_factor += 0.07
+    r_max_limit = max_val * scale_factor
+
     fig = plt.figure(figsize=figsize)
+    fig.patch.set_facecolor("white")
     ax = fig.add_subplot(111, projection="polar")
+
+    margin_factor = 0.18
+    if max_label_len >= 8:
+        margin_factor += 0.04
+    if n >= 12:
+        margin_factor += 0.03
+    margin_factor = min(margin_factor, 0.32)
+    left = right = bottom = top = margin_factor
+    fig.subplots_adjust(left=left, right=1 - right, bottom=bottom, top=1 - top)
 
     bars = ax.bar(
         theta,
@@ -154,10 +180,10 @@ def plot_rose_chart(
     ax.set_xticks(theta)
     ax.set_xticklabels(categories, fontsize=label_fontsize)
 
-    max_val = np.max(values_arr) if len(values_arr) > 0 else 1
     rticks_count = 5
-    rticks = np.linspace(0, max_val, rticks_count + 1)[1:]
-    ax.set_rlim(0, max_val * 1.15)
+    rticks_step = r_max_limit / (rticks_count + 1)
+    rticks = np.arange(rticks_step, r_max_limit + 1e-9, rticks_step)[:rticks_count]
+    ax.set_rlim(0, r_max_limit)
     ax.set_yticks(rticks)
     ax.set_rlabel_position(rlabel_position)
     ax.tick_params(axis="y", labelsize=9, grid_alpha=0.5)
@@ -168,28 +194,36 @@ def plot_rose_chart(
 
     if show_value:
         for bar, angle, val in zip(bars, theta, values_arr):
-            mid_r = val / 2
+            if val <= 0:
+                continue
+            if max_val > 0 and val / max_val < 0.12:
+                label_r = val + r_max_limit * 0.06
+                text_color = "black"
+                bbox_alpha = 0.55
+            else:
+                label_r = val / 2
+                text_color = "white"
+                bbox_alpha = 0.4
             label_text = value_format.format(val)
             ax.text(
                 angle,
-                mid_r,
+                label_r,
                 label_text,
                 ha="center",
                 va="center",
                 fontsize=value_fontsize,
                 fontweight="bold",
-                color="white",
+                color=text_color,
+                clip_on=False,
                 bbox=dict(
-                    boxstyle="round,pad=0.2",
+                    boxstyle="round,pad=0.22",
                     facecolor="black",
-                    alpha=0.4,
+                    alpha=bbox_alpha,
                     edgecolor="none",
                 ),
             )
 
-    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", pad=30)
-
-    plt.tight_layout()
+    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", pad=28)
 
     if save_path:
         fig.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
@@ -311,8 +345,48 @@ def plot_stacked_rose_chart(
         cmap = plt.cm.get_cmap("tab10", n_series)
         colors = {series_names[i]: cmap(i) for i in range(n_series)}
 
+    all_values = np.concatenate([np.array(v, dtype=float) for v in series_data.values()])
+    max_val = np.max(all_values) if len(all_values) > 0 else 1.0
+    if max_val <= 0:
+        max_val = 1.0
+
+    max_label_len = max(len(str(c)) for c in categories) if n_categories > 0 else 0
+    max_series_name_len = max(len(str(s)) for s in series_names) if n_series > 0 else 0
+
+    scale_factor = 1.28
+    scale_factor += 0.02 * min(n_series, 5)
+    if max_label_len >= 6:
+        scale_factor += 0.035 * min(max_label_len - 5, 5)
+    if n_categories >= 8:
+        scale_factor += 0.07
+    if n_categories >= 12:
+        scale_factor += 0.06
+    r_max_limit = max_val * scale_factor
+
     fig = plt.figure(figsize=figsize)
+    fig.patch.set_facecolor("white")
     ax = fig.add_subplot(111, projection="polar")
+
+    left_margin = 0.18
+    right_margin = 0.22 + 0.025 * min(max_series_name_len, 8)
+    bottom_margin = 0.18
+    top_margin = 0.20
+    if max_label_len >= 8:
+        left_margin += 0.04
+        bottom_margin += 0.03
+    if n_categories >= 10:
+        left_margin += 0.02
+        bottom_margin += 0.02
+    left_margin = min(left_margin, 0.30)
+    right_margin = min(right_margin, 0.40)
+    bottom_margin = min(bottom_margin, 0.30)
+    top_margin = min(top_margin, 0.30)
+    fig.subplots_adjust(
+        left=left_margin,
+        right=1 - right_margin,
+        bottom=bottom_margin,
+        top=1 - top_margin,
+    )
 
     group_width = 2 * np.pi / n_categories
     bar_width = group_width * 0.85 / n_series
@@ -344,10 +418,10 @@ def plot_stacked_rose_chart(
     ax.set_xticks(theta)
     ax.set_xticklabels(categories, fontsize=label_fontsize)
 
-    all_values = np.concatenate([np.array(v) for v in series_data.values()])
-    max_val = np.max(all_values) if len(all_values) > 0 else 1
-    rticks = np.linspace(0, max_val, 6)[1:]
-    ax.set_rlim(0, max_val * 1.2)
+    rticks_count = 5
+    rticks_step = r_max_limit / (rticks_count + 1)
+    rticks = np.arange(rticks_step, r_max_limit + 1e-9, rticks_step)[:rticks_count]
+    ax.set_rlim(0, r_max_limit)
     ax.set_yticks(rticks)
     ax.set_rlabel_position(22.5)
     ax.tick_params(axis="y", labelsize=9, grid_alpha=0.5)
@@ -355,19 +429,19 @@ def plot_stacked_rose_chart(
     ax.grid(True, color="#E8E8E8", linestyle="--", linewidth=0.8)
     ax.spines["polar"].set_color("#E8E8E8")
 
+    legend_right_pos = 1.28 + 0.015 * min(max_series_name_len, 10)
     legend = ax.legend(
-        loc="upper right",
-        bbox_to_anchor=(1.35, 1.1),
+        loc="upper left",
+        bbox_to_anchor=(legend_right_pos, 1.06),
         title=legend_title,
         fontsize=10,
         title_fontsize=11,
         frameon=True,
         fancybox=True,
     )
-    legend.get_frame().set_alpha(0.9)
+    legend.get_frame().set_alpha(0.92)
 
-    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", pad=30)
-    plt.tight_layout()
+    ax.set_title(title, fontsize=title_fontsize, fontweight="bold", pad=26)
 
     if save_path:
         fig.savefig(save_path, dpi=dpi, bbox_inches="tight", facecolor="white")
